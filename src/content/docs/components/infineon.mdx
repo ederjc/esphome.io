@@ -37,7 +37,7 @@ switch:
 - **watchdog_timeout** (*Optional*, [Time](/guides/configuration-types/#config-time)):
   Time after which the watchdog resets a stalled device. Use `5s` to `6s`, or
   `0s` to disable the watchdog. Defaults to `6s`.
-- **framework** (*Optional*, mapping): Zephyr settings. For this initial port,
+- **framework** (*Required*, mapping): Zephyr settings. For this initial port,
   use the pinned Zephyr 4.5.0 source above. It includes the kit's hardware-info
   and entropy driver backports. ESPHome downloads the framework and Arm toolchain
   on the first build.
