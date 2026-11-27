@@ -16,6 +16,11 @@ esphome:
 infineon:
   variant: CY8C624A
   board: cy8ckit_062s2_ai
+  framework:
+    source:
+      type: git
+      url: https://github.com/ederjc/zephyr.git
+      ref: d42a8e9e40735695cc3319c9c6b35cbe18f00108
 
 logger:
 
@@ -32,9 +37,10 @@ switch:
 - **watchdog_timeout** (*Optional*, [Time](/guides/configuration-types/#config-time)):
   Time after which the watchdog resets a stalled device. Use `5s` to `6s`, or
   `0s` to disable the watchdog. Defaults to `6s`.
-- **framework** (*Optional*, mapping): Zephyr settings. The default framework
-  is mainline Zephyr 4.5.0. ESPHome downloads the selected framework and Arm
-  toolchain on the first build.
+- **framework** (*Optional*, mapping): Zephyr settings. For this initial port,
+  use the pinned Zephyr 4.5.0 source above. It includes the kit's hardware-info
+  and entropy driver backports. ESPHome downloads the framework and Arm toolchain
+  on the first build.
 
 ## GPIO and serial console
 
