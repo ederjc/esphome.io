@@ -20,7 +20,7 @@ infineon:
     source:
       type: git
       url: https://github.com/ederjc/zephyr.git
-      ref: d42a8e9e40735695cc3319c9c6b35cbe18f00108
+      ref: ifx-psoc6-v4.5.0-core.1
 
 logger:
 
@@ -41,6 +41,9 @@ switch:
   use the pinned Zephyr 4.5.0 source above. It includes the kit's hardware-info
   and entropy driver backports. ESPHome downloads the framework and Arm toolchain
   on the first build.
+
+On Windows, set `ESPHOME_BUILD_PATH` to a short absolute directory if the build
+reports that object file paths are too long.
 
 ## GPIO and serial console
 
