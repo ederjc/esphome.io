@@ -6,8 +6,8 @@ title: "Infineon Platform"
 The `infineon` platform targets the
 [CY8CKIT-062S2-AI](https://www.infineon.com/evaluation-board/CY8CKIT-062S2-AI)
 evaluation kit using Zephyr. The initial port uses the KitProg3 debugger and
-USB-UART console. Wi-Fi, over-the-air updates, and sensor components are not part
-of this initial configuration.
+USB-UART console. Native ESPHome over-the-air updates and onboard sensor
+components are not yet supported.
 
 ```yaml
 esphome:
@@ -50,3 +50,20 @@ reports that object file paths are too long.
 Use `P<port>.<pin>` names for GPIOs. The kit has active-high LEDs on `P5.3`
 and `P5.4`, and an active-low button on `P5.2`. The logger uses the board's
 SCB5 UART routed through KitProg3, at 115200 baud by default.
+
+## Wi-Fi and native API
+
+Add [Wi-Fi](/components/wifi/) to enable the kit's onboard 2.4 GHz CYW43439
+radio. Add the [native API](/components/api/) to let clients connect to ESPHome
+over Wi-Fi. Keep the network credentials and the API encryption key in your
+local `secrets.yaml` rather than the device configuration.
+
+```yaml
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+api:
+  encryption:
+    key: !secret esphome_api_key
+```
