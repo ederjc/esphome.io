@@ -1,0 +1,68 @@
+---
+description: "Configure a Bosch BMM350 three-axis magnetometer in ESPHome."
+title: "BMM350 Magnetometer"
+---
+
+import APIRef from '@components/APIRef.astro';
+
+The `bmm350` sensor platform measures magnetic field strength along three axes
+and reports the sensor die temperature. An [I²C bus](/components/i2c) is required.
+
+```yaml
+sensor:
+  - platform: bmm350
+    field_strength_x:
+      name: "Magnetic Field X"
+    field_strength_y:
+      name: "Magnetic Field Y"
+    field_strength_z:
+      name: "Magnetic Field Z"
+    temperature:
+      name: "Magnetometer Temperature"
+```
+
+## Configuration variables
+
+- **address** (*Optional*, int): The I²C address. Either `0x14` (default) or `0x15`,
+  depending on the state of the sensor's address-select pin.
+- **field_strength_x** (*Optional*): Magnetic field along the sensor's X axis, in
+  µT. Accepts all [sensor options](/components/sensor).
+- **field_strength_y** (*Optional*): Magnetic field along the sensor's Y axis, in
+  µT. Accepts all [sensor options](/components/sensor).
+- **field_strength_z** (*Optional*): Magnetic field along the sensor's Z axis, in
+  µT. Accepts all [sensor options](/components/sensor).
+- **temperature** (*Optional*): Sensor die temperature, in °C. This is not ambient
+  temperature. Accepts all [sensor options](/components/sensor).
+- **update_interval** (*Optional*, [Time](/guides/configuration-types/#time)):
+  How often to read and publish the measurements. Defaults to `60s` and must be
+  at least `40ms`. This does not change the sensor's 25 Hz sampling rate or
+  two-sample averaging.
+
+Field measurements use the sensor's native axes and factory compensation.
+The component does not compute heading or calibrate for nearby magnetic
+materials.
+
+## Infineon PSoC 6 AI Evaluation Kit
+
+The onboard BMM350 on the CY8CKIT-062S2-AI connects directly to the board's
+SCB0 I²C bus at `0x15`. The SCB0 pins are fixed on this board, so do not set
+`sda` or `scl` on the I²C bus. Disable scanning with `scan: false`, because the
+PSoC 6 I²C driver rejects the zero-length probes a scan uses, and set
+`address: 0x15`. Do not configure this sensor through the BMI270's auxiliary bus
+or as a BMM150.
+
+```yaml
+i2c:
+  scan: false
+
+sensor:
+  - platform: bmm350
+    address: 0x15
+    field_strength_x:
+      name: "Magnetic Field X"
+```
+
+## See Also
+
+- [Sensor Filters](/components/sensor/#sensor-filters)
+- <APIRef text="bmm350.h" path="bmm350/bmm350.h" />
