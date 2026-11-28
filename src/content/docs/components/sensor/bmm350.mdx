@@ -45,9 +45,22 @@ materials.
 ## Infineon PSoC 6 AI Evaluation Kit
 
 The onboard BMM350 on the CY8CKIT-062S2-AI connects directly to the board's
-SCB0 I²C bus at `0x15`. Set `address: 0x15` and disable scanning on the I²C
-bus with `scan: false`. Do not configure this sensor through the BMI270's
-auxiliary bus or as a BMM150.
+SCB0 I²C bus at `0x15`. The SCB0 pins are fixed on this board, so do not set
+`sda` or `scl` on the I²C bus. Disable scanning with `scan: false`, because the
+PSoC 6 I²C driver rejects the zero-length probes a scan uses, and set
+`address: 0x15`. Do not configure this sensor through the BMI270's auxiliary bus
+or as a BMM150.
+
+```yaml
+i2c:
+  scan: false
+
+sensor:
+  - platform: bmm350
+    address: 0x15
+    field_strength_x:
+      name: "Magnetic Field X"
+```
 
 ## See Also
 
