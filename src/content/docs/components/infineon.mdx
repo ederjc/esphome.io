@@ -6,8 +6,9 @@ title: "Infineon Platform"
 The `infineon` platform targets the
 [CY8CKIT-062S2-AI](https://www.infineon.com/evaluation-board/CY8CKIT-062S2-AI)
 evaluation kit using Zephyr. The initial port uses the KitProg3 debugger and
-USB-UART console. Native ESPHome over-the-air updates and onboard sensor
-components are not yet supported.
+USB-UART console. The kit's onboard sensors, microphones and radar work with
+existing ESPHome components; see [Onboard peripherals](#infineon-onboard-peripherals).
+Native ESPHome over-the-air updates are not yet supported.
 
 ```yaml
 esphome:
@@ -50,6 +51,131 @@ reports that object file paths are too long.
 Use `P<port>.<pin>` names for GPIOs. The kit has active-high LEDs on `P5.3`
 and `P5.4`, and an active-low button on `P5.2`. The logger uses the board's
 SCB5 UART routed through KitProg3, at 115200 baud by default.
+
+<span id="infineon-onboard-peripherals"></span>
+
+## Onboard peripherals
+
+Each onboard device of the CY8CKIT-062S2-AI uses an existing ESPHome component. The snippets below show only
+the device-specific part. Add the `infineon:` block from the example at the top of this page to each
+configuration.
+
+| Device | Component |
+| --- | --- |
+| DPS368 pressure sensor | [DPS310](/components/sensor/dps310/) (`dps310`) |
+| BMI270 accelerometer and gyroscope | [BMI270](/components/motion/bmi270/) (`bmi270`) |
+| BMM350 magnetometer | [BMM350](/components/sensor/bmm350/) (`bmm350`) |
+| Two PDM microphones | [Zephyr DMIC](/components/microphone/zephyr_dmic/) (`zephyr_dmic`) and [Sound Level](/components/sensor/sound_level/) (`sound_level`) |
+| BGT60TR13C 60 GHz radar | [Infineon BGT60TR13C](/components/infineon_bgt60tr13c/) (`infineon_bgt60tr13c`) |
+
+### I²C sensors
+
+The DPS368, BMI270 and BMM350 share the I²C bus on SCB0. Its pins (`P0.2` for SCL and `P0.3` for SDA) are
+fixed on this board, so do not set `sda` or `scl`. Set `scan: false`, because the PSoC 6 I²C driver rejects the
+zero-length probes that a scan uses.
+
+```yaml
+i2c:
+  id: scb0_bus
+  scan: false
+```
+
+#### DPS368
+
+The DPS368 is register-compatible with the DPS310 and uses the same platform.
+
+```yaml
+sensor:
+  - platform: dps310
+    i2c_id: scb0_bus
+    address: 0x77
+    update_interval: 2s
+    temperature:
+      name: "DPS368 Temperature"
+    pressure:
+      name: "DPS368 Pressure"
+```
+
+#### BMI270
+
+```yaml
+motion:
+  - platform: bmi270
+    id: bmi270_motion
+    i2c_id: scb0_bus
+    address: 0x68
+    update_interval: 2s
+
+sensor:
+  - platform: motion
+    motion_id: bmi270_motion
+    type: acceleration_x
+    name: "BMI270 Acceleration X"
+```
+
+Do not set `aux_device` on this kit. The BMM350 sits on the kit's own I²C bus, not on the BMI270's auxiliary
+bus.
+
+#### BMM350
+
+```yaml
+sensor:
+  - platform: bmm350
+    i2c_id: scb0_bus
+    address: 0x15
+    update_interval: 1s
+    field_strength_x:
+      name: "BMM350 Field X"
+```
+
+### PDM microphones
+
+The two microphones deliver one stereo stream. Use the `ifx-psoc6-v4.5.0-pdm.2` reference of the Zephyr
+source for this, because the PDM driver is not part of the `core` reference. Read the level of each channel
+with a separate passive `sound_level` sensor.
+
+```yaml
+microphone:
+  - platform: zephyr_dmic
+    id: stereo_mic
+    device: pdm0
+    sample_rate: 15625
+    num_channels: 2
+
+sensor:
+  - platform: sound_level
+    microphone:
+      microphone: stereo_mic
+      channels: [0]
+    passive: true
+    peak:
+      name: "Microphone 0 Peak"
+```
+
+Add a second `sound_level` entry with `channels: [1]` for the other microphone, and start capture with
+`microphone.capture`. See [Zephyr DMIC](/components/microphone/zephyr_dmic/) for the full example.
+
+### Radar
+
+The radar connects over SCB6 and needs a devicetree overlay, plus a register list from your own Infineon export.
+The component ships no profile. The
+[BGT60TR13C page](/components/infineon_bgt60tr13c/#infineon-bgt60tr13c-kit) has the overlay.
+
+```yaml
+spi:
+  id: radar_bus
+  interface: scb6
+  clk_pin: P12.2
+  miso_pin: P12.1
+  mosi_pin: P12.0
+
+infineon_bgt60tr13c:
+  id: radar
+  spi_id: radar_bus
+  cs_pin: P12.3
+  reset_pin: P11.1
+  irq_pin: P11.0
+```
 
 ## Wi-Fi and native API
 
