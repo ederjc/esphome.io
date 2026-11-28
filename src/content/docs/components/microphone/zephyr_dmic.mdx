@@ -1,0 +1,139 @@
+---
+description: "Instructions for setting up the Zephyr DMIC PDM microphone platform on the Infineon CY8CKIT-062S2-AI in ESPHome."
+title: "Zephyr DMIC Microphone"
+---
+
+import APIRef from '@components/APIRef.astro';
+
+The `zephyr_dmic` microphone platform captures audio from the two onboard PDM microphones of the
+[CY8CKIT-062S2-AI](/components/infineon/) through Zephyr's digital microphone (DMIC) API. It delivers
+one interleaved 16-bit stereo stream.
+
+This platform only works on the [Infineon platform](/components/infineon/) with the `cy8ckit_062s2_ai` board.
+It rejects every other board, because it is tied to the kit's PDM peripheral and pins.
+
+> [!WARNING]
+> Audio components consume a significant amount of resources (RAM, CPU) on the device.
+
+```yaml
+# Example configuration entry
+microphone:
+  - platform: zephyr_dmic
+    id: stereo_mic
+    device: pdm0
+    sample_rate: 15625
+    num_channels: 2
+```
+
+## Configuration variables
+
+- **device** (**Required**, string): The Zephyr devicetree node label of the PDM controller. Only `pdm0` is
+  supported.
+- **sample_rate** (**Required**, positive integer): The sample rate in Hz. Only `15625` is accepted.
+- **num_channels** (**Required**, integer): The number of channels. Only `2` is accepted. Channel `0` and
+  channel `1` are the two onboard microphones.
+- **bits_per_sample** (*Optional*, integer): The sample bit depth. Only `16` is supported. Defaults to `16`.
+- **id** (*Optional*, [ID](/guides/configuration-types/#id)): Manually specify the ID used for code generation.
+- All other options from [Microphone](/components/microphone/#config-microphone)
+
+The schema accepts a wider range of `sample_rate` and `num_channels` values than the platform supports.
+Validation then rejects anything other than `pdm0`, `15625` Hz and two channels. The kit's Zephyr PDM driver
+clocks the PDM block from an independent 8 MHz clock instead of a configurable audio clock, so the hardware
+setup fixes the rate.
+
+The microphone pins are fixed on this board: `P10.4` carries the PDM clock and `P10.5` the data. Do not
+configure them in YAML.
+
+## Requirements
+
+- **Zephyr source with the PDM driver.** The `core` reference used in the
+  [Infineon platform](/components/infineon/) example has no synchronous PDM driver. Use the
+  `ifx-psoc6-v4.5.0-pdm.2` reference of the `ederjc/zephyr` fork. The build fails with a static assertion if
+  the devicetree node `pdm0` does not use the `infineon,pdm-v1` driver.
+- **A `loop_interval` of at most `20ms`.** The driver reads PCM blocks in the main loop. The component
+  reserves 20 ms for processing and keeps half of the PCM buffer as headroom, which leaves room for a
+  20 ms loop at most. ESPHome's default is 16 ms. Validation fails with a larger value.
+- **One microphone only.** Only one `zephyr_dmic` entry can own `pdm0`.
+
+## CY8CKIT-062S2-AI stereo example
+
+```yaml
+esphome:
+  name: psoc6-mics
+  loop_interval: 16ms
+  on_boot:
+    then:
+      - microphone.capture: stereo_mic
+
+infineon:
+  variant: CY8C624A
+  board: cy8ckit_062s2_ai
+  framework:
+    source:
+      type: git
+      url: https://github.com/ederjc/zephyr.git
+      ref: ifx-psoc6-v4.5.0-pdm.2
+
+logger:
+
+microphone:
+  - platform: zephyr_dmic
+    id: stereo_mic
+    device: pdm0
+    sample_rate: 15625
+    num_channels: 2
+    bits_per_sample: 16
+```
+
+The microphone does not capture on its own. Start it with the `microphone.capture` action, as above, and stop
+it with `microphone.stop_capture`. See [Microphone](/components/microphone/) for the actions and the `on_data`
+trigger.
+
+## Measuring the level of each microphone
+
+Use two [Sound Level](/components/sensor/sound_level/) sensors, one per channel. On Zephyr, each
+`sound_level` instance accepts exactly one selected channel, so stereo input needs two passive instances that
+share the same microphone. Passive instances never start the microphone, so the `microphone.capture` action
+above is required.
+
+```yaml
+sensor:
+  - platform: sound_level
+    microphone:
+      microphone: stereo_mic
+      channels: [0]
+    measurement_duration: 1000ms
+    passive: true
+    peak:
+      name: "Microphone 0 Peak"
+    rms:
+      name: "Microphone 0 RMS"
+  - platform: sound_level
+    microphone:
+      microphone: stereo_mic
+      channels: [1]
+    measurement_duration: 1000ms
+    passive: true
+    peak:
+      name: "Microphone 1 Peak"
+    rms:
+      name: "Microphone 1 RMS"
+```
+
+Both `sound_level` instances share one physical microphone. ESPHome does not reference-count the microphone
+source, so stopping capture stops both. Passive `sound_level.start` and `sound_level.stop` do not control it.
+
+The values are relative to digital full scale and not calibrated. See the
+[Sound Level](/components/sensor/sound_level/) page for the units. Two behaviors are worth knowing:
+
+- Digital silence reports `-inf`. When the microphone stops, both sensors report `NaN` rather than keeping the
+  last value.
+- In bench tests the first measurement window after each start read about -1 dBFS peak and -13 dBFS RMS on
+  both channels. The cause and the settling time are not established. Do not use that window as a baseline.
+
+## See Also
+
+- [Microphone Component](/components/microphone/)
+- [Sound Level Sensor](/components/sensor/sound_level/)
+- [Infineon Platform](/components/infineon/)
+- <APIRef text="zephyr_dmic.h" path="zephyr_dmic/zephyr_dmic.h" />
