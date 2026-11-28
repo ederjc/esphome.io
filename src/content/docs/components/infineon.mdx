@@ -67,3 +67,9 @@ api:
   encryption:
     key: !secret esphome_api_key
 ```
+
+> [!NOTE]
+> Automatic mDNS discovery of the device is not yet working on this platform.
+> Add the device to Home Assistant or the ESPHome dashboard by its IP address,
+> for example by assigning a static address with
+> [`manual_ip`](/components/wifi/#manual-ips).
