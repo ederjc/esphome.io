@@ -1,0 +1,345 @@
+---
+description: "Instructions for setting up the Infineon BGT60TR13C 60 GHz radar in ESPHome."
+title: "Infineon BGT60TR13C Radar"
+---
+
+import APIRef from '@components/APIRef.astro';
+
+The `infineon_bgt60tr13c` component reads raw frames from an Infineon BGT60TR13C 60 GHz radar over
+[SPI](/components/spi/) and publishes simple frame statistics as [sensors](#sensor). It targets the radar
+on the [CY8CKIT-062S2-AI](/components/infineon/) kit.
+
+The component does **not** compute presence or distance. It publishes uncalibrated statistics of the raw
+ADC samples. FFT, clutter removal and calibrated range processing are not part of it.
+
+> [!WARNING]
+> **You must supply the radar register list yourself.** The chirp and frame profile of the radar comes from
+> Infineon's configurator tool, and the published Infineon register tables are under a license that does not
+> allow redistribution in source form. This documentation and the component do not contain a profile. Without
+> a register list the component runs only as a [diagnostic](#diagnostic-mode) and publishes nothing.
+
+```yaml
+# Example configuration entry
+spi:
+  id: radar_bus
+  interface: scb6
+  clk_pin: P12.2
+  miso_pin: P12.1
+  mosi_pin: P12.0
+
+infineon_bgt60tr13c:
+  id: radar
+  spi_id: radar_bus
+  cs_pin: P12.3
+  reset_pin: P11.1
+  irq_pin: P11.0
+```
+
+On the CY8CKIT-062S2-AI, the radar sits on SCB6, which needs a devicetree overlay. See
+[CY8CKIT-062S2-AI wiring](#infineon-bgt60tr13c-kit).
+
+## Configuration variables
+
+### Connection
+
+- **spi_id** (*Optional*, [ID](/guides/configuration-types/#id)): The ID of the [SPI bus](/components/spi/).
+- **cs_pin** (**Required**, [Pin Schema](/guides/configuration-types/#pin-schema)): The chip select pin.
+- **reset_pin** (**Required**, [Pin Schema](/guides/configuration-types/#pin-schema)): The output pin
+  connected to the radar's reset input. The component resets the chip in hardware on startup.
+- **irq_pin** (**Required**, [Pin Schema](/guides/configuration-types/#pin-schema)): The input pin on which
+  the radar signals that its FIFO holds data.
+- **data_rate** (*Optional*, frequency): The SPI clock. Defaults to `1MHz`.
+- **spi_mode** (*Optional*, enum): The SPI mode. Defaults to `MODE0`.
+- **update_interval** (*Optional*, [Time](/guides/configuration-types/#time)): In `triggered` mode, how often
+  to acquire one frame. Defaults to `2s`.
+- **id** (*Optional*, [ID](/guides/configuration-types/#id)): Manually specify the ID used for code generation.
+  You can configure several radars.
+
+### Register list
+
+Provide at most one of the following. Without either, the component stays in [diagnostic mode](#diagnostic-mode).
+
+- **registers** (*Optional*, list of 32-bit hex integers): The register words that configure the radar. Take
+  the words from the output of Infineon's Radar Fusion GUI export for your own profile. Use `!include` to keep
+  the list in a local file, see [Providing the register list](#infineon-bgt60tr13c-registers).
+- **registers_file** (*Optional*, path): A local file that holds the register words. ESPHome reads the file when
+  it generates code. The file can be the C header from the configurator export or a plain list of hex words.
+
+Every word must be a write command: the 7-bit register address in bits 31:25, the write flag in bit 24 and
+24 bits of data. The component rejects words without the write flag, words that address `0x60` or above
+(the FIFO and status registers), and an empty list. The component owns the FIFO limit register and the
+SPI high-speed bit, so the list does not need to set them.
+
+### Frame geometry and acquisition
+
+These options require a register list. The geometry must describe the profile that the register list
+configures. The component cannot read it back from the radar.
+
+- **num_samples_per_chirp** (**Required** with a register list, integer): Samples per chirp, `1` to `1024`.
+- **num_chirps_per_frame** (**Required** with a register list, integer): Chirps per frame, `1` to `4096`.
+- **num_rx_antennas** (**Required** with a register list, integer): Active receive antennas, `1` to `3`.
+- **acquisition_mode** (*Optional*, enum): `triggered` or `continuous`. Defaults to `triggered`. See
+  [Acquisition modes](#infineon-bgt60tr13c-modes).
+- **timeout** (*Optional*, [Time](/guides/configuration-types/#time)): How long to wait for a frame before the
+  component discards it. Defaults to `500ms`. **Required** in `continuous` mode.
+- **fifo_threshold** (*Optional*, integer): The FIFO fill level in samples at which the radar signals the
+  frame as ready. Must be even, from `2` to the frame size. Defaults to the frame size, so the component
+  reads a frame once it is complete.
+- **use_interrupt** (*Optional*, boolean): Use the edge on `irq_pin` as the data-ready signal. When `false`,
+  the component polls the pin level and the FIFO status instead. Defaults to `true`.
+- **frame_log_interval** (*Optional*, integer): Log one `Frame #` line every this many frames. `0` disables
+  the per-frame lines. Defaults to `1`.
+
+<span id="infineon-bgt60tr13c-registers"></span>
+
+## Providing the register list
+
+Export your profile from Infineon's Radar Fusion GUI. Keep the export in a local file and never commit or
+publish it. Then point the component at it in one of two ways.
+
+Use the exported C header directly. The component reads the first `{ ... }` initializer and ignores
+comments and `#define` lines:
+
+```yaml
+infineon_bgt60tr13c:
+  # ...
+  registers_file: radar_settings.h
+```
+
+Or keep the words in a YAML list and `!include` it:
+
+```yaml
+infineon_bgt60tr13c:
+  # ...
+  registers: !include radar_registers.yaml
+```
+
+Here `radar_registers.yaml` contains one 32-bit hex word per list item, copied from your export.
+
+Add the local file to your `.gitignore`. The Infineon license terms for the example register tables allow
+binary-only firmware distribution and require source confidentiality.
+
+Take the three geometry values from the same export. The component cannot check them against the
+register list. A mismatch does not fail the build, and the frame statistics then describe the wrong layout.
+
+<span id="infineon-bgt60tr13c-modes"></span>
+
+## Diagnostic and acquisition modes
+
+The component works in one of two modes, depending on whether you give it a register list.
+
+### Diagnostic mode
+
+With no register list, the component resets the radar, writes the bootstrap command and reads the chip ID. It
+accepts only chip ID `0x000303`. It then logs the register status and the level of the IRQ pin at each update.
+It does not start frames, read the FIFO or publish sensor values. Use it to check wiring and the SPI
+settings before you add a profile.
+
+### Acquisition mode
+
+With a register list, the component configures the radar and reads frames in this order:
+
+1. Reset the chip in hardware and check the chip ID.
+2. Write the register list in order, then read every register back. A mismatch logs a warning and does not stop
+   acquisition. Some status-like registers can legitimately read back differently.
+3. Reset the FIFO and state machine, then start the frame.
+4. Wait for data-ready. A 50 ms watchdog on the FIFO status backs up a missed IRQ edge.
+5. Read the frame in bursts of at most 256 samples, with a 20 ms budget per loop iteration.
+
+A FIFO status error, a timeout, a failed FIFO read or a wrong sample count discards the partial frame. The
+component never joins samples across a loss.
+
+A restart that fails after setup logs an error, leaves acquisition idle and retries at the next update. The
+component marks itself failed after 5 consecutive restart failures. A configuration failure during setup fails
+it immediately.
+
+The component needs an SPI backend that reports per-transaction errors, so it can tell a legitimate zero
+sample from a failed transfer. The Zephyr SPI driver of the [Infineon platform](/components/infineon/)
+provides this. On a backend without it, the component fails visibly instead of claiming a successful read.
+
+## Triggered and continuous mode
+
+| | `triggered` (default) | `continuous` |
+| --- | --- | --- |
+| Frame start | One frame per `update_interval` | Restarts as soon as a frame is read |
+| Frame count in the profile | Forced to 1 | Kept as the profile sets it |
+| `timeout` | Optional, defaults to `500ms` | **Required** |
+| Maximum frame size | Fewer than 16384 samples | Fewer than 8192 samples |
+| Failure recovery | Resets and waits for the next update | Resets and restarts at once |
+
+Use `triggered` mode unless you know the SPI link keeps up with the profile.
+
+> [!NOTE]
+> Only `triggered` mode with the IRQ pin (`use_interrupt: true`) is bench-verified on the CY8CKIT-062S2-AI.
+> `continuous` mode and `use_interrupt: false` are not yet bench-verified.
+
+At 1 MHz, the SPI bus moves at
+most about 125,000 bytes per second. A 2048-sample frame is 3072 bytes of payload and takes about 25 ms on
+the wire. `continuous` mode only works when SPI throughput exceeds the data rate of the profile. Otherwise
+the FIFO overflows and frames are discarded.
+
+### Timeout
+
+In `continuous` mode the component rejects the configuration without `timeout`. The timeout limits the wait for
+the first frame after the start and then the wait for each later frame, counted from the previous one. Set it
+**above the frame period** of your profile. A timeout at or below the frame period discards every frame. The
+component cannot check this value, because it does not know the frame period of your register list.
+
+### Frame size limits
+
+The frame size is `num_samples_per_chirp * num_chirps_per_frame * num_rx_antennas`. The configuration fails if
+the frame size:
+
+- is odd, because the FIFO packs two 12-bit samples into each 24-bit word.
+- is 16384 or more in `triggered` mode. The FIFO holds 16384 samples and reports a full FIFO as an error, so a
+  frame must leave room.
+- is 8192 or more in `continuous` mode. The next frame fills the FIFO while the component still reads the
+  current one, so a frame has to stay below half the FIFO.
+
+<span id="sensor"></span>
+
+## Sensor
+
+The `infineon_bgt60tr13c` sensor platform publishes statistics of each frame. It needs a register list on the
+radar, because the diagnostic mode publishes nothing.
+
+```yaml
+sensor:
+  - platform: infineon_bgt60tr13c
+    infineon_bgt60tr13c_id: radar
+    frame_rate:
+      name: "Radar Frame Rate"
+    signal_rms:
+      name: "Radar Signal RMS"
+    motion_rms:
+      name: "Radar Motion RMS"
+```
+
+### Configuration variables
+
+- **infineon_bgt60tr13c_id** (*Optional*, [ID](/guides/configuration-types/#id)): The ID of the radar to use.
+  Required when you configure more than one.
+- **frame_rate** (*Optional*): The measured frame rate, in Hz. All options from
+  [Sensor](/components/sensor/).
+- **signal_rms** (*Optional*): The RMS of the AC part of each chirp, averaged over chirps and antennas. All
+  options from [Sensor](/components/sensor/).
+- **motion_rms** (*Optional*): The RMS change of the mean chirp against the previous frame. It is `NaN` for the
+  first frame. All options from [Sensor](/components/sensor/).
+
+`signal_rms` and `motion_rms` are in ADC counts, not calibrated units. They show that something changes in the
+radar's field of view, not how far away it is or whether a person is present. The statistics assume the FIFO
+order chirp, then sample, then antenna, with antennas interleaved per sample.
+
+## Log output
+
+The component logs with the tag `infineon_bgt60tr13c`. The `Frame #` and `Acquisition summary` lines use the
+`DEBUG` level, which ESPHome's logger shows by default on the serial console of the kit.
+
+```text
+BGT60TR13C acquisition boot v1
+Configured: registers=%u readback_mismatches=%u mode=%s samples_per_chirp=%u chirps=%u rx=%u frame_samples=%u frame_words=%u fifo_limit_words=%u irq=%s
+Frame #%u src=%s samples=%u fill=%u read_ms=%u rx1_mean=%.1f rx1_min=%u rx1_max=%u rx1_peak=%.1f signal_rms=%.2f motion_rms=%.2f
+Acquisition summary: frames=%u rate_hz=%.2f discarded=%u irq_events=%u
+```
+
+With more than one antenna, each `Frame #` line adds `rx2_...` and `rx3_...` groups. Warnings and errors use
+these forms:
+
+```text
+Register 0x%02X readback 0x%06X expected 0x%06X
+Frame discarded: reason=%s result=%u fill=%u discarded=%u
+Frame restart failed: result=%u attempt=%u/%u; retrying on next update
+Radar protocol failed: %u
+```
+
+- `src` is how the component detected the frame: `irq`, `pin` or `poll`.
+- `fill` is the FIFO fill level in words when the component detected the frame.
+- `rx1_peak` is the larger of the maximum minus the mean and the mean minus the minimum.
+- `reason` is one of `fifo_status`, `timeout`, `fifo_read` or `sample_count`.
+
+<span id="infineon-bgt60tr13c-kit"></span>
+
+## CY8CKIT-062S2-AI wiring
+
+The radar connects to SCB6 and a few GPIOs. The kit's fixtures enable SCB6 and mux its SPI pins with a devicetree overlay. Add the overlay under `infineon:` `framework:`:
+
+```yaml
+infineon:
+  variant: CY8C624A
+  board: cy8ckit_062s2_ai
+  framework:
+    source:
+      type: git
+      url: https://github.com/ederjc/zephyr.git
+      ref: ifx-psoc6-v4.5.0-core.1
+    overlays:
+      app: |
+        #include <zephyr/dt-bindings/pinctrl/ifx_cat1-pinctrl.h>
+
+        &gpio_prt12 {
+          status = "okay";
+        };
+
+        &pinctrl {
+          radar_mosi: radar_mosi {
+            pinmux = <DT_CAT1_PINMUX(12, 0, HSIOM_SEL_ACT_8)>;
+            drive-push-pull;
+          };
+          radar_miso: radar_miso {
+            pinmux = <DT_CAT1_PINMUX(12, 1, HSIOM_SEL_ACT_8)>;
+            input-enable;
+          };
+          radar_clk: radar_clk {
+            pinmux = <DT_CAT1_PINMUX(12, 2, HSIOM_SEL_ACT_8)>;
+            drive-push-pull;
+          };
+        };
+
+        &scb6 {
+          compatible = "infineon,spi";
+          status = "okay";
+          pinctrl-0 = <&radar_mosi &radar_miso &radar_clk>;
+          pinctrl-names = "default";
+        };
+
+spi:
+  id: radar_bus
+  interface: scb6
+  clk_pin: P12.2
+  miso_pin: P12.1
+  mosi_pin: P12.0
+
+infineon_bgt60tr13c:
+  id: radar
+  spi_id: radar_bus
+  cs_pin: P12.3
+  reset_pin: P11.1
+  irq_pin: P11.0
+  update_interval: 1s
+  registers_file: radar_settings.h   # your own export, see above
+  num_samples_per_chirp: 128         # values from the same export
+  num_chirps_per_frame: 16
+  num_rx_antennas: 1
+  acquisition_mode: triggered
+```
+
+| Signal | Pin |
+| --- | --- |
+| SPI MOSI | `P12.0` |
+| SPI MISO | `P12.1` |
+| SPI clock | `P12.2` |
+| Chip select | `P12.3` |
+| IRQ | `P11.0` |
+| Reset | `P11.1` |
+
+The radar runs from an 80 MHz reference clock, which the component does not configure. Export your profile for
+that clock, because the chirp and frame timing in the register list depend on it.
+
+## See Also
+
+- [Infineon Platform](/components/infineon/)
+- [SPI Bus](/components/spi/)
+- [Sensor Component](/components/sensor/)
+- [Infineon XENSIV BGT60TRxx driver](https://github.com/Infineon/sensor-xensiv-bgt60trxx) (Apache-2.0), the
+  basis of the component's SPI protocol.
+- <APIRef text="infineon_bgt60tr13c.h" path="infineon_bgt60tr13c/infineon_bgt60tr13c.h" />
