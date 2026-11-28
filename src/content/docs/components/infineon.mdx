@@ -1,0 +1,52 @@
+---
+description: "Configure the Infineon PSoC 6 platform in ESPHome."
+title: "Infineon Platform"
+---
+
+The `infineon` platform targets the
+[CY8CKIT-062S2-AI](https://www.infineon.com/evaluation-board/CY8CKIT-062S2-AI)
+evaluation kit using Zephyr. The initial port uses the KitProg3 debugger and
+USB-UART console. Wi-Fi, over-the-air updates, and sensor components are not part
+of this initial configuration.
+
+```yaml
+esphome:
+  name: psoc6-kit
+
+infineon:
+  variant: CY8C624A
+  board: cy8ckit_062s2_ai
+  framework:
+    source:
+      type: git
+      url: https://github.com/ederjc/zephyr.git
+      ref: ifx-psoc6-v4.5.0-core.1
+
+logger:
+
+switch:
+  - platform: gpio
+    name: "Kit LED"
+    pin: P5.3
+```
+
+## Configuration variables
+
+- **variant** (*Required*, string): The SoC variant. Use `CY8C624A`.
+- **board** (*Optional*, string): The Zephyr board. Defaults to `cy8ckit_062s2_ai`.
+- **watchdog_timeout** (*Optional*, [Time](/guides/configuration-types/#config-time)):
+  Time after which the watchdog resets a stalled device. Use `5s` to `6s`, or
+  `0s` to disable the watchdog. Defaults to `6s`.
+- **framework** (*Required*, mapping): Zephyr settings. For this initial port,
+  use the pinned Zephyr 4.5.0 source above. It includes the kit's hardware-info
+  and entropy driver backports. ESPHome downloads the framework and Arm toolchain
+  on the first build.
+
+On Windows, set `ESPHOME_BUILD_PATH` to a short absolute directory if the build
+reports that object file paths are too long.
+
+## GPIO and serial console
+
+Use `P<port>.<pin>` names for GPIOs. The kit has active-high LEDs on `P5.3`
+and `P5.4`, and an active-low button on `P5.2`. The logger uses the board's
+SCB5 UART routed through KitProg3, at 115200 baud by default.
